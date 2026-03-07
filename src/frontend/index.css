@@ -1,0 +1,201 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Bricolage Grotesque (display) ── */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("/assets/fonts/BricolageGrotesque[opsz,wdth,wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Sora (body) ── */
+@font-face {
+  font-family: "Sora";
+  src: url("/assets/fonts/Sora[wght].woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+
+    /* Unsaid — Dark Night Theme (single mode) */
+    --background: 0.1 0.005 285;
+    --surface: 0.14 0.008 285;
+    --card: 0.16 0.01 285;
+    --card-hover: 0.19 0.012 285;
+    --popover: 0.18 0.01 285;
+    --border: 0.25 0.015 285;
+    --border-subtle: 0.2 0.01 285;
+
+    /* Accent: electric indigo-violet */
+    --primary: 0.65 0.22 285;
+    --primary-muted: 0.45 0.18 285;
+    --primary-dim: 0.25 0.08 285;
+
+    /* Text */
+    --foreground: 0.94 0.005 285;
+    --foreground-muted: 0.6 0.01 285;
+    --foreground-subtle: 0.42 0.01 285;
+
+    /* Semantic */
+    --muted: 0.18 0.008 285;
+    --muted-foreground: 0.58 0.012 285;
+    --accent: 0.65 0.22 285;
+    --accent-foreground: 0.98 0 0;
+    --secondary: 0.2 0.01 285;
+    --secondary-foreground: 0.88 0.005 285;
+    --destructive: 0.62 0.22 22;
+    --destructive-foreground: 0.98 0 0;
+    --input: 0.22 0.012 285;
+    --ring: 0.65 0.22 285;
+
+    /* Sidebar */
+    --sidebar: 0.12 0.007 285;
+    --sidebar-foreground: 0.94 0.005 285;
+    --sidebar-primary: 0.65 0.22 285;
+    --sidebar-primary-foreground: 0.98 0 0;
+    --sidebar-accent: 0.2 0.01 285;
+    --sidebar-accent-foreground: 0.88 0.005 285;
+    --sidebar-border: 0.22 0.012 285;
+    --sidebar-ring: 0.65 0.22 285;
+
+    /* Charts */
+    --chart-1: 0.65 0.22 285;
+    --chart-2: 0.62 0.22 22;
+    --chart-3: 0.72 0.16 160;
+    --chart-4: 0.75 0.18 55;
+    --chart-5: 0.68 0.2 320;
+
+    /* Category colors */
+    --cat-career: 0.72 0.16 225;
+    --cat-workplace: 0.68 0.18 160;
+    --cat-startup: 0.65 0.22 285;
+    --cat-manufacturing: 0.70 0.14 55;
+    --cat-confessions: 0.62 0.22 22;
+    --cat-advice: 0.68 0.2 320;
+
+    /* Bottom nav height */
+    --nav-height: 60px;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    background-color: oklch(var(--background));
+    color: oklch(var(--foreground));
+    font-family: "Sora", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Bricolage Grotesque", sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .text-muted-foreground {
+    color: oklch(var(--muted-foreground));
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(var(--border));
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--primary-muted));
+  }
+
+  /* Horizontal scroll hide scrollbar */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Category chip scrollbar */
+  .chips-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+  }
+
+  /* Safe area bottom padding */
+  .pb-safe {
+    padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 16px);
+  }
+
+  /* Bottom nav safe area */
+  .bottom-nav-height {
+    height: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Glass card effect */
+  .glass-card {
+    background: oklch(var(--card));
+    border: 1px solid oklch(var(--border));
+    backdrop-filter: blur(8px);
+  }
+
+  /* Gradient accent text */
+  .gradient-text {
+    background: linear-gradient(
+      135deg,
+      oklch(0.75 0.18 285),
+      oklch(0.65 0.22 285),
+      oklch(0.60 0.20 310)
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Upvote active state */
+  .upvote-active {
+    color: oklch(var(--primary));
+  }
+
+  /* Post card hover */
+  .post-card {
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  }
+  .post-card:active {
+    transform: scale(0.99);
+  }
+
+  /* Noise texture overlay */
+  .noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0.4;
+  }
+}
