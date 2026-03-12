@@ -38,7 +38,7 @@ import {
 import { relativeTime } from "../utils/time";
 
 const ADMIN_STORAGE_KEY = "wb_admin_auth";
-const ADMIN_PASSWORD = "unsaid2024";
+const ADMIN_PASSWORD = "whisper2024";
 
 function AdminGate({ onAuth }: { onAuth: () => void }) {
   const [password, setPassword] = useState("");
@@ -429,10 +429,20 @@ function CommentsTab() {
   );
 }
 
+const DEFAULT_CATEGORIES = [
+  "Career",
+  "Workplace",
+  "Startup",
+  "Manufacturing",
+  "Confessions",
+  "Advice",
+];
+
 // ── Categories Tab ─────────────────────────────────────────────────────────
 
 function CategoriesTab() {
   const [newCat, setNewCat] = useState("");
+  const [isSeeding, setIsSeeding] = useState(false);
   const { data: categories, isLoading } = useAdminGetCategories();
   const addCategory = useAdminAddCategory();
   const removeCategory = useAdminRemoveCategory();
@@ -450,6 +460,14 @@ function CategoriesTab() {
           color: "oklch(0.94 0.005 285)",
         },
       });
+    } else {
+      toast.error("Failed to add category. Check your connection.", {
+        style: {
+          background: "oklch(0.16 0.01 285)",
+          border: "1px solid oklch(0.62 0.22 22 / 0.4)",
+          color: "oklch(0.94 0.005 285)",
+        },
+      });
     }
   };
 
@@ -457,6 +475,38 @@ function CategoriesTab() {
     const ok = await removeCategory.mutateAsync(id);
     if (ok) {
       toast.success(`Category "${name}" removed.`, {
+        style: {
+          background: "oklch(0.16 0.01 285)",
+          border: "1px solid oklch(0.25 0.015 285)",
+          color: "oklch(0.94 0.005 285)",
+        },
+      });
+    }
+  };
+
+  const handleSeedDefaults = async () => {
+    setIsSeeding(true);
+    const existingNames = new Set(
+      (categories ?? []).map((c) => c.name.toLowerCase()),
+    );
+    let added = 0;
+    for (const name of DEFAULT_CATEGORIES) {
+      if (!existingNames.has(name.toLowerCase())) {
+        const ok = await addCategory.mutateAsync(name);
+        if (ok) added++;
+      }
+    }
+    setIsSeeding(false);
+    if (added > 0) {
+      toast.success(`Added ${added} default categories.`, {
+        style: {
+          background: "oklch(0.16 0.01 285)",
+          border: "1px solid oklch(0.25 0.015 285)",
+          color: "oklch(0.94 0.005 285)",
+        },
+      });
+    } else {
+      toast.success("All default categories already exist.", {
         style: {
           background: "oklch(0.16 0.01 285)",
           border: "1px solid oklch(0.25 0.015 285)",
@@ -480,7 +530,7 @@ function CategoriesTab() {
         />
         <Button
           type="submit"
-          disabled={addCategory.isPending || !newCat.trim()}
+          disabled={addCategory.isPending || isSeeding || !newCat.trim()}
           className="shrink-0 min-h-[44px] px-4 bg-[oklch(0.65_0.22_285)] hover:bg-[oklch(0.70_0.22_285)] text-white rounded-xl disabled:opacity-50"
           data-ocid="admin.category.button"
         >
@@ -506,12 +556,26 @@ function CategoriesTab() {
           ))}
         </div>
       ) : !categories || categories.length === 0 ? (
-        <p
-          className="text-center text-[oklch(0.45_0.01_285)] py-6"
+        <div
+          className="flex flex-col items-center gap-3 py-6 text-center"
           data-ocid="admin.categories.empty_state"
         >
-          No categories yet.
-        </p>
+          <p className="text-[oklch(0.45_0.01_285)] text-sm">
+            No categories yet. Add one above or seed the defaults.
+          </p>
+          <Button
+            type="button"
+            onClick={handleSeedDefaults}
+            disabled={isSeeding}
+            className="text-xs min-h-[36px] px-4 bg-[oklch(0.65_0.22_285/0.15)] hover:bg-[oklch(0.65_0.22_285/0.25)] text-[oklch(0.75_0.22_285)] border border-[oklch(0.65_0.22_285/0.3)] rounded-xl"
+            data-ocid="admin.category.seed_button"
+          >
+            {isSeeding ? (
+              <Loader2 size={14} className="animate-spin mr-1.5" />
+            ) : null}
+            Seed Default Categories
+          </Button>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           {categories.map((cat, i) => (

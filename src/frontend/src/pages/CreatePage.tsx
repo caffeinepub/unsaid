@@ -52,6 +52,8 @@ export function CreatePage() {
         [CreatePostError.bannedIp]: "Your device has been restricted.",
         [CreatePostError.contentBlocked]:
           "Your post contains blocked content. Please revise.",
+        [CreatePostError.rateLimitExceeded]:
+          "You're posting too fast. Please wait a moment.",
         [CreatePostError.internalError]:
           "Something went wrong. Please try again.",
       };

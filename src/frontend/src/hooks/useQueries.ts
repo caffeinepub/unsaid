@@ -5,7 +5,7 @@ import { getDeviceId } from "../utils/fingerprint";
 import { markCommentUpvoted, markPostUpvoted } from "../utils/upvoteStore";
 import { useActor } from "./useActor";
 
-const ADMIN_PASSWORD = "unsaid2024";
+const ADMIN_PASSWORD = "whisper2024";
 
 // ── Posts ──────────────────────────────────────────────────────────────────
 
