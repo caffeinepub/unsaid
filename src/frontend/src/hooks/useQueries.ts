@@ -19,7 +19,7 @@ export function useGetPosts(
   return useQuery({
     queryKey: ["posts", tab, String(category), String(page), String(pageSize)],
     queryFn: async () => {
-      if (!actor) return { totalCount: BigInt(0), posts: [] };
+      if (!actor) throw new Error("Actor not ready");
       return actor.getPosts(tab, category, page, pageSize);
     },
     enabled: !!actor && !isFetching,
@@ -32,7 +32,7 @@ export function useGetPost(id: PostId) {
   return useQuery({
     queryKey: ["post", String(id)],
     queryFn: async () => {
-      if (!actor) return null;
+      if (!actor) throw new Error("Actor not ready");
       return actor.getPost(id);
     },
     enabled: !!actor && !isFetching,
@@ -47,7 +47,7 @@ export function useGetCategories() {
   return useQuery({
     queryKey: ["categories"],
     queryFn: async () => {
-      if (!actor) return [];
+      if (!actor) throw new Error("Actor not ready");
       return actor.getCategories();
     },
     enabled: !!actor && !isFetching,
@@ -62,7 +62,7 @@ export function useGetStats() {
   return useQuery({
     queryKey: ["stats"],
     queryFn: async () => {
-      if (!actor) return null;
+      if (!actor) throw new Error("Actor not ready");
       return actor.getStats();
     },
     enabled: !!actor && !isFetching,
@@ -77,7 +77,7 @@ export function useGetAnonymousId(ipHash: IpHash, postId: PostId) {
   return useQuery({
     queryKey: ["anonId", ipHash, String(postId)],
     queryFn: async () => {
-      if (!actor) return BigInt(0);
+      if (!actor) throw new Error("Actor not ready");
       return actor.getAnonymousId(ipHash, postId);
     },
     enabled: !!actor && !isFetching && !!ipHash,
@@ -180,6 +180,21 @@ export function useUpvoteComment() {
   });
 }
 
+// ── Comments (for admin) ──────────────────────────────────────────────────
+
+export function useGetComments(postId: PostId) {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["comments", String(postId)],
+    queryFn: async () => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.getComments(postId);
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: 30_000,
+  });
+}
+
 // ── Admin Queries ──────────────────────────────────────────────────────────
 
 export function useAdminGetCategories() {
@@ -187,7 +202,7 @@ export function useAdminGetCategories() {
   return useQuery({
     queryKey: ["admin", "categories"],
     queryFn: async () => {
-      if (!actor) return null;
+      if (!actor) throw new Error("Actor not ready");
       return actor.adminGetCategories(ADMIN_PASSWORD);
     },
     enabled: !!actor && !isFetching,
@@ -200,7 +215,7 @@ export function useAdminGetBannedIps() {
   return useQuery({
     queryKey: ["admin", "bannedIps"],
     queryFn: async () => {
-      if (!actor) return null;
+      if (!actor) throw new Error("Actor not ready");
       return actor.adminGetBannedIps(ADMIN_PASSWORD);
     },
     enabled: !!actor && !isFetching,
@@ -213,7 +228,7 @@ export function useAdminGetBlockedKeywords() {
   return useQuery({
     queryKey: ["admin", "keywords"],
     queryFn: async () => {
-      if (!actor) return null;
+      if (!actor) throw new Error("Actor not ready");
       return actor.adminGetBlockedKeywords(ADMIN_PASSWORD);
     },
     enabled: !!actor && !isFetching,
@@ -249,6 +264,7 @@ export function useAdminDeleteComment() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["posts"] });
       queryClient.invalidateQueries({ queryKey: ["admin"] });
+      queryClient.invalidateQueries({ queryKey: ["comments"] });
     },
   });
 }

@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   Ban,
   BarChart3,
+  ChevronDown,
+  ChevronRight,
   Eye,
   FileText,
   KeyRound,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import type { PostId } from "../backend.d";
 import { PostTab } from "../backend.d";
 import {
   useAdminAddCategory,
@@ -32,6 +35,7 @@ import {
   useAdminRemoveCategory,
   useAdminRemoveKeyword,
   useAdminUnbanIp,
+  useGetComments,
   useGetPosts,
   useGetStats,
 } from "../hooks/useQueries";
@@ -40,6 +44,21 @@ import { relativeTime } from "../utils/time";
 const ADMIN_STORAGE_KEY = "wb_admin_auth";
 const ADMIN_PASSWORD = "whisper2024";
 
+const toastSuccess = () => ({
+  style: {
+    background: "oklch(0.16 0.01 285)",
+    border: "1px solid oklch(0.25 0.015 285)",
+    color: "oklch(0.94 0.005 285)",
+  },
+});
+const toastError = () => ({
+  style: {
+    background: "oklch(0.16 0.01 285)",
+    border: "1px solid oklch(0.62 0.22 22 / 0.4)",
+    color: "oklch(0.94 0.005 285)",
+  },
+});
+
 function AdminGate({ onAuth }: { onAuth: () => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -47,7 +66,8 @@ function AdminGate({ onAuth }: { onAuth: () => void }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (password === ADMIN_PASSWORD) {
-      localStorage.setItem(ADMIN_STORAGE_KEY, "true");
+      // Use sessionStorage so auth clears when the tab closes
+      sessionStorage.setItem(ADMIN_STORAGE_KEY, "true");
       onAuth();
     } else {
       setError("Incorrect password.");
@@ -97,7 +117,6 @@ function AdminGate({ onAuth }: { onAuth: () => void }) {
               </p>
             )}
           </div>
-
           <Button
             type="submit"
             className="min-h-[48px] bg-[oklch(0.65_0.22_285)] hover:bg-[oklch(0.70_0.22_285)] text-white font-semibold rounded-xl shadow-glow-sm"
@@ -139,7 +158,6 @@ function OverviewTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats cards */}
       <div className="grid grid-cols-2 gap-3">
         <div className="glass-card rounded-xl p-4">
           <p className="text-xs text-[oklch(0.5_0.01_285)] mb-1">Total Posts</p>
@@ -176,7 +194,6 @@ function OverviewTab() {
         </div>
       </div>
 
-      {/* Daily post chart */}
       {dailyCounts.length > 0 && (
         <div className="glass-card rounded-xl p-4">
           <p className="text-xs font-semibold text-[oklch(0.6_0.01_285)] uppercase tracking-wider mb-3">
@@ -186,7 +203,6 @@ function OverviewTab() {
             {dailyCounts.map((count, dayIdx) => {
               const val = Number(count);
               const pct = (val / maxCount) * 100;
-              // dayIdx combined with length gives stable keys for fixed-size arrays
               const stableKey = `d${dailyCounts.length}p${dayIdx}`;
               return (
                 <div
@@ -219,18 +235,27 @@ function PostsTab() {
     BigInt(20),
   );
   const deletePost = useAdminDeletePost();
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   const posts = postsPage?.posts ?? [];
 
   const handleDelete = async (id: bigint) => {
-    const ok = await deletePost.mutateAsync(id);
-    if (ok) {
-      toast.success("Post deleted.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
+    const key = String(id);
+    setDeletingIds((prev) => new Set(prev).add(key));
+    try {
+      const ok = await deletePost.mutateAsync(id);
+      if (ok) {
+        toast.success("Post deleted.", toastSuccess());
+      } else {
+        toast.error("Failed to delete post.", toastError());
+      }
+    } catch {
+      toast.error("Could not delete post. Please try again.", toastError());
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
       });
     }
   };
@@ -302,12 +327,12 @@ function PostsTab() {
             <button
               type="button"
               onClick={() => handleDelete(post.id)}
-              disabled={deletePost.isPending}
+              disabled={deletingIds.has(String(post.id))}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-[oklch(0.5_0.01_285)] hover:text-[oklch(0.62_0.22_22)] hover:bg-[oklch(0.62_0.22_22/0.1)] transition-colors"
               aria-label="Delete post"
               data-ocid={`admin.post.delete_button.${i + 1}`}
             >
-              {deletePost.isPending ? (
+              {deletingIds.has(String(post.id)) ? (
                 <Loader2 size={14} className="animate-spin" />
               ) : (
                 <Trash2 size={14} />
@@ -320,33 +345,128 @@ function PostsTab() {
   );
 }
 
-// ── Comments Tab ───────────────────────────────────────────────────────────
+// ── Comments Tab: expanded view per post ───────────────────────────────────
+
+function PostCommentsList({
+  postId,
+  postTitle,
+}: { postId: PostId; postTitle: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: comments, isLoading } = useGetComments(postId);
+  const deleteComment = useAdminDeleteComment();
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+
+  const handleDelete = async (commentId: bigint) => {
+    const key = String(commentId);
+    setDeletingIds((prev) => new Set(prev).add(key));
+    try {
+      const ok = await deleteComment.mutateAsync(commentId);
+      if (ok) {
+        toast.success("Comment deleted.", toastSuccess());
+      } else {
+        toast.error("Failed to delete comment.", toastError());
+      }
+    } catch {
+      toast.error("Could not delete comment. Please try again.", toastError());
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const count = comments?.length ?? 0;
+
+  return (
+    <div className="glass-card rounded-xl overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[oklch(0.18_0.01_285/0.5)] transition-colors"
+      >
+        {expanded ? (
+          <ChevronDown
+            size={14}
+            className="text-[oklch(0.5_0.01_285)] shrink-0"
+          />
+        ) : (
+          <ChevronRight
+            size={14}
+            className="text-[oklch(0.5_0.01_285)] shrink-0"
+          />
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-[oklch(0.88_0.005_285)] truncate">
+            {postTitle}
+          </p>
+          <p className="text-[10px] text-[oklch(0.5_0.01_285)]">
+            {count} comment{count !== 1 ? "s" : ""}
+          </p>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-[oklch(0.2_0.01_285)]">
+          {isLoading ? (
+            <div className="px-4 py-3">
+              <Skeleton className="h-10 rounded bg-[oklch(0.18_0.01_285)]" />
+            </div>
+          ) : count === 0 ? (
+            <p className="px-4 py-3 text-xs text-[oklch(0.45_0.01_285)]">
+              No comments yet.
+            </p>
+          ) : (
+            <div className="divide-y divide-[oklch(0.18_0.01_285)]">
+              {(comments ?? []).map((comment, ci) => (
+                <div
+                  key={String(comment.id)}
+                  className="px-4 py-3 flex items-start gap-3"
+                  data-ocid={`admin.comment.item.${ci + 1}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-[oklch(0.78_0.005_285)] leading-relaxed line-clamp-2">
+                      {comment.content}
+                    </p>
+                    <p className="text-[10px] text-[oklch(0.42_0.01_285)] mt-0.5">
+                      {relativeTime(comment.timestamp)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(comment.id)}
+                    disabled={deletingIds.has(String(comment.id))}
+                    className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center text-[oklch(0.5_0.01_285)] hover:text-[oklch(0.62_0.22_22)] hover:bg-[oklch(0.62_0.22_22/0.1)] transition-colors"
+                    aria-label="Delete comment"
+                    data-ocid={`admin.comment.delete_button.${ci + 1}`}
+                  >
+                    {deletingIds.has(String(comment.id)) ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CommentsTab() {
-  const navigate = useNavigate();
   const { data: postsPage, isLoading } = useGetPosts(
     PostTab.latest,
     null,
     BigInt(0),
     BigInt(20),
   );
-  const deleteComment = useAdminDeleteComment();
-
-  // Collect all comments from posts
-  const posts = postsPage?.posts ?? [];
-
-  const handleDelete = async (id: bigint) => {
-    const ok = await deleteComment.mutateAsync(id);
-    if (ok) {
-      toast.success("Comment deleted.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
-    }
-  };
+  const posts = (postsPage?.posts ?? []).filter(
+    (p) => Number(p.commentCount) > 0,
+  );
 
   if (isLoading) {
     return (
@@ -370,64 +490,25 @@ function CommentsTab() {
         className="text-center text-[oklch(0.45_0.01_285)] py-10"
         data-ocid="admin.comments.empty_state"
       >
-        No posts available to show comments for.
+        No posts with comments yet.
       </p>
     );
   }
 
   return (
     <div className="flex flex-col gap-2">
-      {posts
-        .filter((p) => Number(p.commentCount) > 0)
-        .map((post, i) => (
-          <div
-            key={String(post.id)}
-            className="glass-card rounded-xl p-3 flex items-start gap-3"
-            data-ocid={`admin.comment.item.${i + 1}`}
-          >
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-[oklch(0.55_0.01_285)] truncate mb-0.5">
-                Post: {post.title}
-              </p>
-              <p className="text-sm font-medium text-[oklch(0.78_0.005_285)]">
-                {Number(post.commentCount)} comment
-                {Number(post.commentCount) !== 1 ? "s" : ""}
-              </p>
-              <span className="text-[10px] text-[oklch(0.42_0.01_285)]">
-                {relativeTime(post.timestamp)}
-              </span>
-            </div>
-            <div className="flex gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={() =>
-                  navigate({ to: "/post/$id", params: { id: String(post.id) } })
-                }
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-[oklch(0.5_0.01_285)] hover:text-[oklch(0.7_0.01_285)] hover:bg-[oklch(0.22_0.01_285)] transition-colors"
-                aria-label="View post comments"
-              >
-                <Eye size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(post.id)}
-                disabled={deleteComment.isPending}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-[oklch(0.5_0.01_285)] hover:text-[oklch(0.62_0.22_22)] hover:bg-[oklch(0.62_0.22_22/0.1)] transition-colors"
-                aria-label="Delete comments"
-                data-ocid={`admin.comment.delete_button.${i + 1}`}
-              >
-                {deleteComment.isPending ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Trash2 size={14} />
-                )}
-              </button>
-            </div>
-          </div>
-        ))}
+      {posts.map((post) => (
+        <PostCommentsList
+          key={String(post.id)}
+          postId={post.id}
+          postTitle={post.title}
+        />
+      ))}
     </div>
   );
 }
+
+// ── Categories Tab ─────────────────────────────────────────────────────────
 
 const DEFAULT_CATEGORIES = [
   "Career",
@@ -437,8 +518,6 @@ const DEFAULT_CATEGORIES = [
   "Confessions",
   "Advice",
 ];
-
-// ── Categories Tab ─────────────────────────────────────────────────────────
 
 function CategoriesTab() {
   const [newCat, setNewCat] = useState("");
@@ -450,75 +529,61 @@ function CategoriesTab() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCat.trim()) return;
-    const ok = await addCategory.mutateAsync(newCat.trim());
-    if (ok) {
-      setNewCat("");
-      toast.success(`Category "${newCat.trim()}" added.`, {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
-    } else {
-      toast.error("Failed to add category. Check your connection.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.62 0.22 22 / 0.4)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
+    try {
+      const ok = await addCategory.mutateAsync(newCat.trim());
+      if (ok) {
+        setNewCat("");
+        toast.success(`Category "${newCat.trim()}" added.`, toastSuccess());
+      } else {
+        toast.error("Failed to add category.", toastError());
+      }
+    } catch {
+      toast.error("Could not add category. Please try again.", toastError());
     }
   };
 
   const handleRemove = async (id: bigint, name: string) => {
-    const ok = await removeCategory.mutateAsync(id);
-    if (ok) {
-      toast.success(`Category "${name}" removed.`, {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
+    try {
+      const ok = await removeCategory.mutateAsync(id);
+      if (ok) {
+        toast.success(`Category "${name}" removed.`, toastSuccess());
+      } else {
+        toast.error(`Failed to remove category "${name}".`, toastError());
+      }
+    } catch {
+      toast.error("Could not remove category. Please try again.", toastError());
     }
   };
 
   const handleSeedDefaults = async () => {
     setIsSeeding(true);
-    const existingNames = new Set(
-      (categories ?? []).map((c) => c.name.toLowerCase()),
-    );
-    let added = 0;
-    for (const name of DEFAULT_CATEGORIES) {
-      if (!existingNames.has(name.toLowerCase())) {
-        const ok = await addCategory.mutateAsync(name);
-        if (ok) added++;
+    try {
+      const existingNames = new Set(
+        (categories ?? []).map((c) => c.name.toLowerCase()),
+      );
+      let added = 0;
+      for (const name of DEFAULT_CATEGORIES) {
+        if (!existingNames.has(name.toLowerCase())) {
+          try {
+            const ok = await addCategory.mutateAsync(name);
+            if (ok) added++;
+          } catch {
+            // Continue seeding remaining categories even if one fails
+          }
+        }
       }
-    }
-    setIsSeeding(false);
-    if (added > 0) {
-      toast.success(`Added ${added} default categories.`, {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
-    } else {
-      toast.success("All default categories already exist.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
+      if (added > 0) {
+        toast.success(`Added ${added} default categories.`, toastSuccess());
+      } else {
+        toast.success("All default categories already exist.", toastSuccess());
+      }
+    } finally {
+      setIsSeeding(false);
     }
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Add category form */}
       <form onSubmit={handleAdd} className="flex gap-2">
         <Input
           value={newCat}
@@ -542,7 +607,6 @@ function CategoriesTab() {
         </Button>
       </form>
 
-      {/* Categories list */}
       {isLoading ? (
         <div
           className="flex flex-col gap-2"
@@ -624,16 +688,24 @@ function CategoriesTab() {
 function BannedIpsTab() {
   const { data: bannedIps, isLoading } = useAdminGetBannedIps();
   const unbanIp = useAdminUnbanIp();
+  const [unbanningIds, setUnbanningIds] = useState<Set<string>>(new Set());
 
   const handleUnban = async (ipHash: string) => {
-    const ok = await unbanIp.mutateAsync(ipHash);
-    if (ok) {
-      toast.success("IP unbanned.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
+    setUnbanningIds((prev) => new Set(prev).add(ipHash));
+    try {
+      const ok = await unbanIp.mutateAsync(ipHash);
+      if (ok) {
+        toast.success("IP unbanned.", toastSuccess());
+      } else {
+        toast.error("Failed to unban IP.", toastError());
+      }
+    } catch {
+      toast.error("Could not unban IP. Please try again.", toastError());
+    } finally {
+      setUnbanningIds((prev) => {
+        const next = new Set(prev);
+        next.delete(ipHash);
+        return next;
       });
     }
   };
@@ -677,11 +749,15 @@ function BannedIpsTab() {
           <button
             type="button"
             onClick={() => handleUnban(ip)}
-            disabled={unbanIp.isPending}
+            disabled={unbanningIds.has(ip)}
             className="shrink-0 text-xs px-3 py-1.5 rounded-lg border border-[oklch(0.68_0.18_160/0.4)] text-[oklch(0.68_0.18_160)] hover:bg-[oklch(0.68_0.18_160/0.1)] transition-colors min-h-[32px]"
             data-ocid={`admin.banned.button.${i + 1}`}
           >
-            Unban
+            {unbanningIds.has(ip) ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              "Unban"
+            )}
           </button>
         </div>
       ))}
@@ -700,35 +776,37 @@ function KeywordsTab() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKeyword.trim()) return;
-    const ok = await addKeyword.mutateAsync(newKeyword.trim().toLowerCase());
-    if (ok) {
-      setNewKeyword("");
-      toast.success(`Keyword "${newKeyword.trim()}" blocked.`, {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
+    try {
+      const ok = await addKeyword.mutateAsync(newKeyword.trim().toLowerCase());
+      if (ok) {
+        setNewKeyword("");
+        toast.success(
+          `Keyword "${newKeyword.trim()}" blocked.`,
+          toastSuccess(),
+        );
+      } else {
+        toast.error("Failed to add keyword.", toastError());
+      }
+    } catch {
+      toast.error("Could not add keyword. Please try again.", toastError());
     }
   };
 
   const handleRemove = async (keyword: string) => {
-    const ok = await removeKeyword.mutateAsync(keyword);
-    if (ok) {
-      toast.success(`Keyword "${keyword}" unblocked.`, {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
+    try {
+      const ok = await removeKeyword.mutateAsync(keyword);
+      if (ok) {
+        toast.success(`Keyword "${keyword}" unblocked.`, toastSuccess());
+      } else {
+        toast.error(`Failed to remove keyword "${keyword}".`, toastError());
+      }
+    } catch {
+      toast.error("Could not remove keyword. Please try again.", toastError());
     }
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Add keyword */}
       <form onSubmit={handleAdd} className="flex gap-2">
         <Input
           value={newKeyword}
@@ -752,7 +830,6 @@ function KeywordsTab() {
         </Button>
       </form>
 
-      {/* Keywords list */}
       {isLoading ? (
         <div
           className="flex flex-col gap-2"
@@ -833,7 +910,7 @@ export function AdminPage() {
   const navigate = useNavigate();
   const [isAuthed, setIsAuthed] = useState(() => {
     try {
-      return localStorage.getItem(ADMIN_STORAGE_KEY) === "true";
+      return sessionStorage.getItem(ADMIN_STORAGE_KEY) === "true";
     } catch {
       return false;
     }
@@ -864,7 +941,6 @@ export function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[oklch(0.1_0.005_285)]">
-      {/* Header */}
       <header className="sticky top-0 z-30 bg-[oklch(0.1_0.005_285/0.95)] backdrop-blur-md border-b border-[oklch(0.22_0.012_285)]">
         <div className="max-w-[480px] mx-auto px-4 py-3 flex items-center gap-3">
           <button
@@ -887,7 +963,7 @@ export function AdminPage() {
           <button
             type="button"
             onClick={() => {
-              localStorage.removeItem(ADMIN_STORAGE_KEY);
+              sessionStorage.removeItem(ADMIN_STORAGE_KEY);
               setIsAuthed(false);
             }}
             className="text-xs text-[oklch(0.45_0.01_285)] hover:text-[oklch(0.62_0.22_22)] transition-colors shrink-0 min-h-[36px] px-2"
@@ -896,7 +972,6 @@ export function AdminPage() {
           </button>
         </div>
 
-        {/* Tab scroll */}
         <div
           ref={tabScrollRef}
           className="chips-scroll scrollbar-hide px-4 pb-3 max-w-[480px] mx-auto"
@@ -923,7 +998,6 @@ export function AdminPage() {
         </div>
       </header>
 
-      {/* Content */}
       <main className="max-w-[480px] mx-auto px-4 pt-4 pb-safe">
         {renderTabContent()}
       </main>

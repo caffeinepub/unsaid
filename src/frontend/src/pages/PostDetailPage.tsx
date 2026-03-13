@@ -18,6 +18,7 @@ import { useActor } from "../hooks/useActor";
 import {
   useCreateComment,
   useGetAnonymousId,
+  useGetCategories,
   useGetPost,
   useUpvoteComment,
   useUpvotePost,
@@ -26,6 +27,14 @@ import { getCategoryColor } from "../utils/categories";
 import { getDeviceId } from "../utils/fingerprint";
 import { formatDate, relativeTime } from "../utils/time";
 import { hasUpvotedComment, hasUpvotedPost } from "../utils/upvoteStore";
+
+const toastStyle = (isError = false) => ({
+  style: {
+    background: "oklch(0.16 0.01 285)",
+    border: `1px solid ${isError ? "oklch(0.62 0.22 22 / 0.4)" : "oklch(0.25 0.015 285)"}`,
+    color: "oklch(0.94 0.005 285)",
+  },
+});
 
 // Component to show the anonymous ID for a comment
 function CommentAnonymousLabel({
@@ -69,11 +78,17 @@ function CommentItem({
   const [localCount, setLocalCount] = useState(Number(comment.upvotes));
   const [localUpvoted, setLocalUpvoted] = useState(upvoted);
 
-  const handleUpvote = () => {
+  const handleUpvote = async () => {
     if (localUpvoted) return;
     setLocalUpvoted(true);
     setLocalCount((c) => c + 1);
-    upvoteComment.mutate({ commentId: comment.id, postId });
+    try {
+      await upvoteComment.mutateAsync({ commentId: comment.id, postId });
+    } catch {
+      // Roll back optimistic update on failure
+      setLocalUpvoted(false);
+      setLocalCount((c) => c - 1);
+    }
   };
 
   return (
@@ -119,6 +134,7 @@ export function PostDetailPage() {
 
   const { data: postWithComments, isLoading, error } = useGetPost(postId);
   const { data: anonIdData } = useGetAnonymousId(deviceId, postId);
+  const { data: categories } = useGetCategories();
   const upvotePost = useUpvotePost();
   const createComment = useCreateComment();
 
@@ -136,51 +152,58 @@ export function PostDetailPage() {
     }
   }, [post]);
 
-  // Find category
-  const category =
-    post?.category !== undefined
-      ? { id: post.category, name: "", isActive: true }
+  // Resolve actual category name from ID
+  const resolvedCategory =
+    post?.category !== undefined && categories
+      ? categories.find((c) => c.id === post.category)
       : undefined;
 
-  const handleUpvote = () => {
+  const catColors = resolvedCategory
+    ? getCategoryColor(resolvedCategory.name, 0)
+    : null;
+
+  const handleUpvote = async () => {
     if (postUpvoted || !post) return;
     setPostUpvoted(true);
     setLocalUpvotes((c) => (c ?? 0) + 1);
-    upvotePost.mutate({ postId: post.id });
+    try {
+      await upvotePost.mutateAsync({ postId: post.id });
+    } catch {
+      setPostUpvoted(false);
+      setLocalUpvotes((c) => (c !== null ? c - 1 : null));
+    }
   };
 
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentText.trim()) return;
 
-    const result = await createComment.mutateAsync({
-      postId,
-      content: commentText.trim(),
-    });
+    try {
+      const result = await createComment.mutateAsync({
+        postId,
+        content: commentText.trim(),
+      });
 
-    if (result.__kind__ === "ok") {
-      setCommentText("");
-      toast.success("Comment posted.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
-    } else {
-      const errorMessages: Record<string, string> = {
-        [CreateCommentError.bannedIp]: "Your device has been restricted.",
-        [CreateCommentError.contentBlocked]:
-          "Your comment contains blocked content.",
-        [CreateCommentError.internalError]: "Something went wrong.",
-      };
-      toast.error(errorMessages[result.err] ?? "Failed to post comment.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.62 0.22 22 / 0.4)",
-          color: "oklch(0.94 0.005 285)",
-        },
-      });
+      if (result.__kind__ === "ok") {
+        setCommentText("");
+        toast.success("Comment posted.", toastStyle());
+      } else {
+        const errorMessages: Record<string, string> = {
+          [CreateCommentError.bannedIp]: "Your device has been restricted.",
+          [CreateCommentError.contentBlocked]:
+            "Your comment contains blocked content.",
+          [CreateCommentError.internalError]: "Something went wrong.",
+        };
+        toast.error(
+          errorMessages[result.err] ?? "Failed to post comment.",
+          toastStyle(true),
+        );
+      }
+    } catch {
+      toast.error(
+        "Could not connect. Please check your connection and try again.",
+        toastStyle(true),
+      );
     }
   };
 
@@ -235,9 +258,6 @@ export function PostDetailPage() {
     );
   }
 
-  // Get category color if available
-  const catColors = category ? getCategoryColor("general", 0) : null;
-
   return (
     <div className="min-h-screen bg-[oklch(0.1_0.005_285)]">
       {/* Header */}
@@ -269,11 +289,11 @@ export function PostDetailPage() {
         <article className="glass-card rounded-xl p-4 mb-4">
           {/* Category + meta row */}
           <div className="flex items-center justify-between mb-3 gap-2">
-            {post.category !== undefined ? (
+            {resolvedCategory ? (
               <span
                 className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded border ${catColors?.bg ?? "bg-[oklch(0.2_0.01_285/0.15)]"} ${catColors?.text ?? "text-[oklch(0.55_0.01_285)]"} ${catColors?.border ?? "border-[oklch(0.25_0.01_285/0.3)]"}`}
               >
-                Category
+                {resolvedCategory.name}
               </span>
             ) : (
               <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded border bg-[oklch(0.2_0.01_285/0.15)] text-[oklch(0.55_0.01_285)] border-[oklch(0.25_0.01_285/0.3)]">
@@ -297,7 +317,7 @@ export function PostDetailPage() {
             />
             <span className="text-xs font-semibold text-[oklch(0.65_0.22_285)]">
               Anonymous #
-              {anonIdData !== undefined
+              {anonIdData != null
                 ? String(anonIdData).padStart(4, "0")
                 : "????"}
             </span>

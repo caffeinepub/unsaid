@@ -1,36 +1,37 @@
 # Unsaid
 
 ## Current State
-The app is a fully anonymous discussion platform ("Whisper Board") with:
-- Anonymous posting and commenting (no login required)
-- Category-based filtering (Career, Workplace, Startup, Manufacturing, Confessions, Advice)
-- Trending + Latest feeds
-- Upvoting on posts and comments
-- IP/device fingerprinting for anonymous IDs (Anonymous #XXXX)
-- Rate limiting: max 5 posts per device per hour (tracked via `postTimestamps` map)
-- Profanity/content filter via blocked keywords
-- IP banning
-- Admin dashboard at `/admin` protected by hardcoded password `whisper2024`
-- Admin tools: delete posts/comments, ban IPs, manage blocked keywords, manage categories
+Anonymous discussion platform with home feed, post detail, create post (page + sheet), and admin dashboard. Backend runs on Motoko.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Nothing new to add
+- try/catch around every mutateAsync call in CreatePage, CreatePostSheet, PostDetailPage (comment + upvote), AdminPage (all tabs)
+- Error toast fallback for all silent failures
+- useEffect in CreatePostSheet to reset form state when sheet closes
+- rateLimitExceeded error key in CreatePostSheet errorMessages map
+- Per-post upvoting state (Set of in-flight IDs) in HomePage so one upvote doesn't disable all others
+- Proper loading skeleton while actor is initialising in PostDetailPage (avoid false "post not found" screen)
 
 ### Modify
-- Rename all branding from "Whisper Board" to "Unsaid" across the frontend (page titles, headers, meta tags, admin panel, etc.)
-- Remove the `#rateLimitExceeded` error variant from `CreatePostError` type
-- Remove the `postTimestamps` map and all rate limiting logic from `createPost` in the backend
-- Update frontend to no longer handle `#rateLimitExceeded` error responses
+- PostDetailPage: fetch categories, resolve category name from ID, display real category name in badge (not hard-coded "Category")
+- PostDetailPage: useGetAnonymousId fallback should return null not BigInt(0), guard with != null
+- CommentsTab in AdminPage: fetch individual comments per post using getComments, delete by comment.id not post.id
+- AdminPage: use sessionStorage instead of localStorage for admin auth flag
+- AdminPage CategoriesTab handleRemove/handleSeedDefaults: add try/catch and finally block for isSeeding state reset
+- AdminPage KeywordsTab handleAdd/handleRemove: add else branch for ok===false, add try/catch
+- AdminPage BannedIpsTab handleUnban: add try/catch and else branch
+- AdminPage PostsTab handleDelete: add try/catch
+- HomePage category filter chips: unique data-ocid per chip
+- useQueries useGetPost: do not return null when actor unavailable, rely on enabled flag
 
 ### Remove
-- All rate limiting code in backend (`postTimestamps` map, hourly post count check in `createPost`)
-- `#rateLimitExceeded` error variant from the `CreatePostError` type
-- Any frontend UI or error messaging related to rate limit exceeded
+- Hard-coded "Category" text in PostDetailPage category badge
+- stub category object { id, name: "", isActive: true } in PostDetailPage
 
 ## Implementation Plan
-1. Edit `main.mo`: remove `postTimestamps` map declaration, remove `#rateLimitExceeded` from `CreatePostError`, remove the rate limiting block inside `createPost`
-2. Update `backend.d.ts` to reflect the removed `#rateLimitExceeded` variant
-3. Update all frontend files: replace "Whisper Board" with "Unsaid", update page title in `index.html`, update any references in components/pages
-4. Remove any frontend error handling for `#rateLimitExceeded`
+1. Fix CreatePage and CreatePostSheet: wrap handleSubmit in try/catch, add missing error key, add form reset useEffect in sheet
+2. Fix PostDetailPage: add useGetCategories, resolve category name, fix anonId null guard, add try/catch to comment submit and upvotes, fix actor-loading false error screen
+3. Fix AdminPage: CommentsTab to fetch real comments and delete by comment.id; add try/catch + error toasts to all admin mutation handlers; sessionStorage for auth
+4. Fix HomePage: per-post isPending tracking
+5. Fix useQueries: useGetPost should not return null-as-data when actor unavailable

@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -12,7 +11,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useNavigate } from "@tanstack/react-router";
 import { Ghost, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CreatePostError } from "../backend.d";
 import { useCreatePost, useGetCategories } from "../hooks/useQueries";
@@ -34,46 +33,61 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
   const activeCategories = categories?.filter((c) => c.isActive) ?? [];
   const canSubmit = title.trim().length > 0 && content.trim().length > 0;
 
+  // Reset form when sheet closes
+  useEffect(() => {
+    if (!open) {
+      setTitle("");
+      setContent("");
+      setCategoryId("");
+    }
+  }, [open]);
+
+  const toastStyle = (isError = false) => ({
+    style: {
+      background: "oklch(0.16 0.01 285)",
+      border: `1px solid ${isError ? "oklch(0.62 0.22 22 / 0.4)" : "oklch(0.25 0.015 285)"}`,
+      color: "oklch(0.94 0.005 285)",
+    },
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
 
-    const result = await createPost.mutateAsync({
-      title: title.trim(),
-      content: content.trim(),
-      category: categoryId && categoryId !== "none" ? BigInt(categoryId) : null,
-    });
-
-    if (result.__kind__ === "ok") {
-      toast.success("Your post has been shared anonymously.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
+    try {
+      const result = await createPost.mutateAsync({
+        title: title.trim(),
+        content: content.trim(),
+        category:
+          categoryId && categoryId !== "none" ? BigInt(categoryId) : null,
       });
-      setTitle("");
-      setContent("");
-      setCategoryId("");
-      onOpenChange(false);
-      navigate({ to: "/post/$id", params: { id: String(result.ok.id) } });
-    } else {
-      const errorMessages: Record<string, string> = {
-        [CreatePostError.bannedIp]: "Your device has been restricted.",
-        [CreatePostError.contentBlocked]:
-          "Your post contains blocked content. Please revise.",
-        [CreatePostError.internalError]:
-          "Something went wrong. Please try again.",
-      };
+
+      if (result.__kind__ === "ok") {
+        toast.success("Your post has been shared anonymously.", toastStyle());
+        setTitle("");
+        setContent("");
+        setCategoryId("");
+        onOpenChange(false);
+        navigate({ to: "/post/$id", params: { id: String(result.ok.id) } });
+      } else {
+        const errorMessages: Record<string, string> = {
+          [CreatePostError.bannedIp]: "Your device has been restricted.",
+          [CreatePostError.contentBlocked]:
+            "Your post contains blocked content. Please revise.",
+          [CreatePostError.rateLimitExceeded]:
+            "You're posting too fast. Please wait a moment.",
+          [CreatePostError.internalError]:
+            "Something went wrong. Please try again.",
+        };
+        toast.error(
+          errorMessages[result.err] ?? "Failed to post. Please try again.",
+          toastStyle(true),
+        );
+      }
+    } catch {
       toast.error(
-        errorMessages[result.err] ?? "Failed to post. Please try again.",
-        {
-          style: {
-            background: "oklch(0.16 0.01 285)",
-            border: "1px solid oklch(0.62 0.22 22 / 0.4)",
-            color: "oklch(0.94 0.005 285)",
-          },
-        },
+        "Could not connect. Please check your connection and try again.",
+        toastStyle(true),
       );
     }
   };
@@ -88,7 +102,6 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
           borderTop: "1px solid oklch(0.26 0.016 285)",
         }}
       >
-        {/* Gradient header zone — the product moment */}
         <div
           className="relative px-5 pt-5 pb-4 overflow-hidden"
           style={{
@@ -97,12 +110,10 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
             borderBottom: "1px solid oklch(0.22 0.012 285 / 0.6)",
           }}
         >
-          {/* Drag handle */}
           <div
             className="w-8 h-1 rounded-full bg-[oklch(0.32_0.01_285)] mx-auto mb-4"
             aria-hidden="true"
           />
-
           <div className="flex items-center gap-2.5">
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
@@ -129,12 +140,10 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
           </div>
         </div>
 
-        {/* Form body */}
         <form
           onSubmit={handleSubmit}
           className="flex flex-col gap-0 px-5 pt-4 pb-8"
         >
-          {/* Title field */}
           <div className="flex flex-col gap-0 mb-4">
             <div className="flex items-baseline justify-between mb-1.5">
               <Label
@@ -173,7 +182,6 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
             />
           </div>
 
-          {/* Description field */}
           <div className="flex flex-col gap-0 mb-4">
             <div className="flex items-baseline justify-between mb-1.5">
               <Label
@@ -212,7 +220,6 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
             />
           </div>
 
-          {/* Category field */}
           <div className="flex flex-col gap-0 mb-5">
             <Label className="text-[12px] font-semibold uppercase tracking-widest text-[oklch(0.52_0.01_285)] mb-1.5">
               Category{" "}
@@ -261,7 +268,6 @@ export function CreatePostSheet({ open, onOpenChange }: CreatePostSheetProps) {
             </Select>
           </div>
 
-          {/* Submit — persistent glow, not just hover */}
           <button
             type="submit"
             disabled={createPost.isPending || !canSubmit}

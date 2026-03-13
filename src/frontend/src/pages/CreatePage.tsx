@@ -28,51 +28,54 @@ export function CreatePage() {
 
   const activeCategories = categories?.filter((c) => c.isActive) ?? [];
 
+  const toastStyle = (isError = false) => ({
+    style: {
+      background: "oklch(0.16 0.01 285)",
+      border: `1px solid ${isError ? "oklch(0.62 0.22 22 / 0.4)" : "oklch(0.25 0.015 285)"}`,
+      color: "oklch(0.94 0.005 285)",
+    },
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
 
-    const result = await createPost.mutateAsync({
-      title: title.trim(),
-      content: content.trim(),
-      category: categoryId && categoryId !== "none" ? BigInt(categoryId) : null,
-    });
-
-    if (result.__kind__ === "ok") {
-      toast.success("Your post has been shared anonymously.", {
-        style: {
-          background: "oklch(0.16 0.01 285)",
-          border: "1px solid oklch(0.25 0.015 285)",
-          color: "oklch(0.94 0.005 285)",
-        },
+    try {
+      const result = await createPost.mutateAsync({
+        title: title.trim(),
+        content: content.trim(),
+        category:
+          categoryId && categoryId !== "none" ? BigInt(categoryId) : null,
       });
-      navigate({ to: "/post/$id", params: { id: String(result.ok.id) } });
-    } else {
-      const errorMessages: Record<string, string> = {
-        [CreatePostError.bannedIp]: "Your device has been restricted.",
-        [CreatePostError.contentBlocked]:
-          "Your post contains blocked content. Please revise.",
-        [CreatePostError.rateLimitExceeded]:
-          "You're posting too fast. Please wait a moment.",
-        [CreatePostError.internalError]:
-          "Something went wrong. Please try again.",
-      };
+
+      if (result.__kind__ === "ok") {
+        toast.success("Your post has been shared anonymously.", toastStyle());
+        navigate({ to: "/post/$id", params: { id: String(result.ok.id) } });
+      } else {
+        const errorMessages: Record<string, string> = {
+          [CreatePostError.bannedIp]: "Your device has been restricted.",
+          [CreatePostError.contentBlocked]:
+            "Your post contains blocked content. Please revise.",
+          [CreatePostError.rateLimitExceeded]:
+            "You're posting too fast. Please wait a moment.",
+          [CreatePostError.internalError]:
+            "Something went wrong. Please try again.",
+        };
+        toast.error(
+          errorMessages[result.err] ?? "Failed to post. Please try again.",
+          toastStyle(true),
+        );
+      }
+    } catch {
       toast.error(
-        errorMessages[result.err] ?? "Failed to post. Please try again.",
-        {
-          style: {
-            background: "oklch(0.16 0.01 285)",
-            border: "1px solid oklch(0.62 0.22 22 / 0.4)",
-            color: "oklch(0.94 0.005 285)",
-          },
-        },
+        "Could not connect. Please check your connection and try again.",
+        toastStyle(true),
       );
     }
   };
 
   return (
     <div className="min-h-screen bg-[oklch(0.1_0.005_285)]">
-      {/* Header */}
       <header className="sticky top-0 z-30 bg-[oklch(0.1_0.005_285/0.95)] backdrop-blur-md border-b border-[oklch(0.22_0.012_285)]">
         <div className="max-w-[480px] mx-auto px-4 py-3 flex items-center gap-3">
           <button
@@ -97,7 +100,6 @@ export function CreatePage() {
       </header>
 
       <main className="max-w-[480px] mx-auto px-4 pt-6 pb-safe">
-        {/* Anonymity notice */}
         <div className="flex items-center gap-2 p-3 rounded-xl bg-[oklch(0.65_0.22_285/0.08)] border border-[oklch(0.65_0.22_285/0.2)] mb-6">
           <Ghost
             size={16}
@@ -110,7 +112,6 @@ export function CreatePage() {
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          {/* Title */}
           <div className="flex flex-col gap-2">
             <Label
               htmlFor="post-title"
@@ -134,7 +135,6 @@ export function CreatePage() {
             </div>
           </div>
 
-          {/* Content */}
           <div className="flex flex-col gap-2">
             <Label
               htmlFor="post-content"
@@ -158,7 +158,6 @@ export function CreatePage() {
             </div>
           </div>
 
-          {/* Category */}
           <div className="flex flex-col gap-2">
             <Label className="text-[oklch(0.78_0.01_285)] text-sm font-semibold">
               Category{" "}

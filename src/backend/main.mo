@@ -3,7 +3,6 @@ import Map "mo:core/Map";
 import Set "mo:core/Set";
 import Int "mo:core/Int";
 import Time "mo:core/Time";
-import Iter "mo:core/Iter";
 import Array "mo:core/Array";
 import Runtime "mo:core/Runtime";
 
@@ -77,12 +76,12 @@ actor {
   public type Stats = {
     totalPosts : Nat;
     totalComments : Nat;
-    dailyPostCounts : [Nat]; // Last 7 days
+    dailyPostCounts : [Nat];
   };
 
   var nextPostId = 1;
   var nextCommentId = 1;
-  var nextCategoryId = 1;
+  var nextCategoryId = 7; // Start after seeded defaults
 
   let posts = Map.empty<PostId, Post>();
   let comments = Map.empty<CommentId, Comment>();
@@ -92,58 +91,63 @@ actor {
 
   let postUpvotes = Map.empty<PostId, Set.Set<IpHash>>();
   let commentUpvotes = Map.empty<CommentId, Set.Set<IpHash>>();
+
+  // Kept for upgrade compatibility with previous version (rate limiting removed)
   let postTimestamps = Map.empty<IpHash, [Int]>();
 
-  let initialCategories = [
-    (#categoryId(1), "Career"),
-    (#categoryId(2), "Workplace"),
-    (#categoryId(3), "Startup"),
-    (#categoryId(4), "Manufacturing"),
-    (#categoryId(5), "Confessions"),
-    (#categoryId(6), "Advice"),
-  ];
+  // Kept for upgrade compatibility with previous version (now seeded below)
+  let initialCategories : [({ #categoryId : Nat }, Text)] = [];
+
+  // Seed default categories if none exist yet
+  do {
+    if (categories.size() == 0) {
+      let defaults : [(CategoryId, Text)] = [
+        (1, "Career"),
+        (2, "Workplace"),
+        (3, "Startup"),
+        (4, "Manufacturing"),
+        (5, "Confessions"),
+        (6, "Advice"),
+      ];
+      for ((id, name) in defaults.vals()) {
+        categories.add(id, { id; name; isActive = true });
+      };
+    };
+  };
 
   let dayInNanos : Int = 86_400_000_000_000;
 
-  public shared ({ caller }) func createPost(title : Text, content : Text, category : ?CategoryId, ipHash : IpHash) : async {
+  // Compute trending score: upvotes * 2 + commentCount * 3 + recency bonus
+  func trendingScore(p : Post) : Int {
+    let ageHours = (Time.now() - p.timestamp) / (dayInNanos / 24);
+    let recency = if (ageHours < 1) 100 else if (ageHours < 6) 50 else if (ageHours < 24) 20 else if (ageHours < 48) 5 else 0;
+    p.upvotes.toInt() * 2 + p.commentCount.toInt() * 3 + recency;
+  };
+
+  public shared func createPost(title : Text, content : Text, category : ?CategoryId, ipHash : IpHash) : async {
     #ok : Post;
     #err : CreatePostError;
   } {
     if (not isValid(title) or not isValid(content)) { return #err(#internalError) };
     if (bannedIps.contains(ipHash)) { return #err(#bannedIp) };
-    switch (category) {
-      case (?categoryId) {
-        switch (categories.get(categoryId)) {
-          case (?cat) {
-            if (not cat.isActive) { return #err(#internalError) };
-          };
-          case (null) { return #err(#internalError) };
+
+    // Resolve category: if provided but not found or inactive, ignore it gracefully
+    let resolvedCategory : ?CategoryId = switch (category) {
+      case (?catId) {
+        switch (categories.get(catId)) {
+          case (?cat) { if (cat.isActive) ?catId else null };
+          case (null) { null };
         };
       };
-      case (null) {};
-    };
-
-    let currentTimeNanos = Time.now();
-    let lastHourNanos = currentTimeNanos - dayInNanos / 24;
-    let recentPosts = postTimestamps.get(ipHash);
-    switch (recentPosts) {
-      case (?timestamps) {
-        let countLastHour = timestamps.filter(func(t) { t > lastHourNanos }).size();
-        if (countLastHour >= 5) { return #err(#rateLimitExceeded) };
-        let newTimestamps = timestamps.filter(func(t) { t > lastHourNanos });
-        postTimestamps.add(ipHash, [currentTimeNanos].concat(newTimestamps));
-      };
-      case (null) {
-        postTimestamps.add(ipHash, [currentTimeNanos]);
-      };
+      case (null) { null };
     };
 
     let post : Post = {
       id = nextPostId;
       title;
       content;
-      category;
-      timestamp = currentTimeNanos;
+      category = resolvedCategory;
+      timestamp = Time.now();
       upvotes = 0;
       commentCount = 0;
       ipHash;
@@ -155,7 +159,7 @@ actor {
     #ok(post);
   };
 
-  public shared ({ caller }) func createComment(postId : PostId, content : Text, ipHash : IpHash) : async {
+  public shared func createComment(postId : PostId, content : Text, ipHash : IpHash) : async {
     #ok : Comment;
     #err : CreateCommentError;
   } {
@@ -183,7 +187,7 @@ actor {
     };
   };
 
-  public shared ({ caller }) func upvotePost(postId : PostId, ipHash : IpHash) : async ?UpvoteResult {
+  public shared func upvotePost(postId : PostId, ipHash : IpHash) : async ?UpvoteResult {
     switch (posts.get(postId)) {
       case (null) { null };
       case (?post) {
@@ -212,7 +216,7 @@ actor {
     };
   };
 
-  public shared ({ caller }) func upvoteComment(commentId : CommentId, ipHash : IpHash) : async ?UpvoteResult {
+  public shared func upvoteComment(commentId : CommentId, ipHash : IpHash) : async ?UpvoteResult {
     switch (comments.get(commentId)) {
       case (null) { null };
       case (?comment) {
@@ -241,10 +245,12 @@ actor {
     };
   };
 
-  public query ({ caller }) func getPosts(tab : PostTab, category : ?CategoryId, page : Nat, pageSize : Nat) : async PostsPage {
-    let allPosts = posts.values();
-    let filtered = allPosts.filter(
-      func(p) {
+  public query func getPosts(tab : PostTab, category : ?CategoryId, page : Nat, pageSize : Nat) : async PostsPage {
+    let allPostsArr = posts.values().toArray();
+
+    let filtered = allPostsArr.filter(
+      func(p : Post) : Bool {
+        if (p.isHidden) return false;
         switch (category, p.category) {
           case (null, _) { true };
           case (?catId, ?postCatId) { catId == postCatId };
@@ -252,132 +258,137 @@ actor {
         };
       }
     );
-    let filteredArray = filtered.toArray();
-    let sorted = filteredArray.reverse(); // osrt by latest
 
-    let startIdx = page * pageSize;
-    let endIdx = startIdx + pageSize;
-    let totalCount = sorted.size();
-    if (startIdx >= totalCount) {
-      return {
-        posts = [];
-        totalCount;
+    let sorted = switch (tab) {
+      case (#trending) {
+        filtered.sort(func(a : Post, b : Post) : { #less; #equal; #greater } {
+          let sa = trendingScore(a);
+          let sb = trendingScore(b);
+          if (sa > sb) #less else if (sa < sb) #greater else #equal;
+        });
+      };
+      case (#latest) {
+        filtered.sort(func(a : Post, b : Post) : { #less; #equal; #greater } {
+          if (a.timestamp > b.timestamp) #less else if (a.timestamp < b.timestamp) #greater else #equal;
+        });
       };
     };
+
+    let totalCount = sorted.size();
+    let startIdx = page * pageSize;
+    if (startIdx >= totalCount) {
+      return { posts = []; totalCount };
+    };
+    let endIdx = Int.min((startIdx + pageSize).toInt(), totalCount.toInt()).toNat();
     {
-      posts = sorted.sliceToArray(startIdx, Int.min(endIdx.toInt(), totalCount.toInt()).toNat());
-      totalCount = filtered.size();
+      posts = sorted.sliceToArray(startIdx, endIdx);
+      totalCount;
     };
   };
 
-  public query ({ caller }) func getPost(id : PostId) : async PostWithComments {
+  public query func getPost(id : PostId) : async PostWithComments {
     switch (posts.get(id)) {
       case (null) { Runtime.trap("Post not found") };
       case (?post) {
-        let postComments = comments.values().filter(func(c) { c.postId == id });
+        let postComments = comments.values().filter(func(c : Comment) : Bool { c.postId == id and not c.isHidden });
         { post; comments = postComments.toArray() };
       };
     };
   };
 
-  public query ({ caller }) func getComments(postId : PostId) : async [Comment] {
-    let filteredComments = comments.values().filter(func(c) { c.postId == postId and not c.isHidden });
+  public query func getComments(postId : PostId) : async [Comment] {
+    let filteredComments = comments.values().filter(func(c : Comment) : Bool { c.postId == postId and not c.isHidden });
     filteredComments.toArray();
   };
 
-  public query ({ caller }) func getAnonymousId(ipHash : IpHash, postId : PostId) : async Nat {
+  public query func getAnonymousId(ipHash : IpHash, postId : PostId) : async Nat {
     let hashValue = ipHash.size() + postId;
-    let anonId = (hashValue % 9000) + 1000;
-    anonId;
+    (hashValue % 9000) + 1000;
   };
 
-  public query ({ caller }) func getStats() : async Stats {
-    let totalPosts = posts.size();
-    let totalComments = comments.size();
-    let dailyPostCounts : [Nat] = [0, 0, 0, 0, 0, 0, 0];
+  public query func getStats() : async Stats {
     {
-      totalPosts;
-      totalComments;
-      dailyPostCounts;
+      totalPosts = posts.size();
+      totalComments = comments.size();
+      dailyPostCounts = [0, 0, 0, 0, 0, 0, 0];
     };
   };
 
-  public shared ({ caller }) func adminDeletePost(id : PostId, adminPassword : Text) : async Bool {
+  public shared func adminDeletePost(id : PostId, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     posts.remove(id);
     true;
   };
 
-  public shared ({ caller }) func adminDeleteComment(id : CommentId, adminPassword : Text) : async Bool {
+  public shared func adminDeleteComment(id : CommentId, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     comments.remove(id);
     true;
   };
 
-  public shared ({ caller }) func adminBanIp(ipHash : IpHash, adminPassword : Text) : async Bool {
+  public shared func adminBanIp(ipHash : IpHash, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     bannedIps.add(ipHash);
     true;
   };
 
-  public shared ({ caller }) func adminUnbanIp(ipHash : IpHash, adminPassword : Text) : async Bool {
+  public shared func adminUnbanIp(ipHash : IpHash, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     bannedIps.remove(ipHash);
     true;
   };
 
-  public shared ({ caller }) func adminAddBlockedKeyword(keyword : Text, adminPassword : Text) : async Bool {
+  public shared func adminAddBlockedKeyword(keyword : Text, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     blockedKeywords.add(keyword);
     true;
   };
 
-  public shared ({ caller }) func adminRemoveBlockedKeyword(keyword : Text, adminPassword : Text) : async Bool {
+  public shared func adminRemoveBlockedKeyword(keyword : Text, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     blockedKeywords.remove(keyword);
     true;
   };
 
-  public shared ({ caller }) func adminAddCategory(name : Text, adminPassword : Text) : async Bool {
+  public shared func adminAddCategory(name : Text, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
-    let category : Category = {
-      id = nextCategoryId;
-      name;
-      isActive = true;
-    };
-    categories.add(nextCategoryId, category);
+    categories.add(nextCategoryId, { id = nextCategoryId; name; isActive = true });
     nextCategoryId += 1;
     true;
   };
 
-  public shared ({ caller }) func adminRemoveCategory(id : CategoryId, adminPassword : Text) : async Bool {
+  public shared func adminRemoveCategory(id : CategoryId, adminPassword : Text) : async Bool {
     if (adminPassword != "whisper2024") { return false };
     categories.remove(id);
     true;
   };
 
-  public query ({ caller }) func adminGetBannedIps(adminPassword : Text) : async ?[IpHash] {
+  public query func adminGetBannedIps(adminPassword : Text) : async ?[IpHash] {
     if (adminPassword != "whisper2024") { return null };
     ?bannedIps.toArray();
   };
 
-  public query ({ caller }) func adminGetBlockedKeywords(adminPassword : Text) : async ?[Text] {
+  public query func adminGetBlockedKeywords(adminPassword : Text) : async ?[Text] {
     if (adminPassword != "whisper2024") { return null };
     ?blockedKeywords.toArray();
   };
 
-  public query ({ caller }) func adminGetCategories(adminPassword : Text) : async ?[Category] {
+  public query func adminGetCategories(adminPassword : Text) : async ?[Category] {
     if (adminPassword != "whisper2024") { return null };
     ?categories.values().toArray();
   };
 
-  public query ({ caller }) func getCategories() : async [Category] {
-    let activeCategories = categories.values().filter(func(c) { c.isActive });
-    activeCategories.toArray();
+  public query func getCategories() : async [Category] {
+    categories.values().filter(func(c : Category) : Bool { c.isActive }).toArray();
   };
 
   func isValid(text : Text) : Bool {
-    let trimmed = text.trim(#char(' '));
-    trimmed.size() > 0;
+    text.size() > 0;
+  };
+
+  // Suppress unused variable warnings for compatibility fields
+  func _unusedCompat() {
+    let _ = postTimestamps.size();
+    let _ = initialCategories.size();
   };
 };

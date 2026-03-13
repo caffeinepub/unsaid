@@ -29,6 +29,10 @@ export function HomePage() {
 
   const [page, setPage] = useState(BigInt(0));
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  // Track which post IDs have upvotes in-flight
+  const [pendingUpvoteIds, setPendingUpvoteIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   const { data: categories } = useGetCategories();
   const {
@@ -73,8 +77,18 @@ export function HomePage() {
   }, []);
 
   const handleUpvote = useCallback(
-    (postId: bigint) => {
-      upvotePost.mutate({ postId });
+    async (postId: bigint) => {
+      const key = String(postId);
+      setPendingUpvoteIds((prev) => new Set(prev).add(key));
+      try {
+        await upvotePost.mutateAsync({ postId });
+      } finally {
+        setPendingUpvoteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
     },
     [upvotePost],
   );
@@ -146,7 +160,7 @@ export function HomePage() {
                   : "bg-[oklch(0.16_0.008_285)] text-[oklch(0.55_0.01_285)] border-[oklch(0.22_0.01_285)] hover:border-[oklch(0.35_0.015_285)]"
               }`}
               onClick={() => handleCategoryChange(null)}
-              data-ocid="home.category.tab"
+              data-ocid="home.all_categories.tab"
             >
               All
             </button>
@@ -162,9 +176,8 @@ export function HomePage() {
                       : "bg-[oklch(0.16_0.008_285)] text-[oklch(0.55_0.01_285)] border-[oklch(0.22_0.01_285)] hover:border-[oklch(0.35_0.015_285)]"
                   }`}
                   onClick={() => handleCategoryChange(String(cat.id))}
-                  data-ocid="home.category.tab"
+                  data-ocid={`home.category.tab.${i + 1}`}
                   aria-pressed={isActive}
-                  style={{ order: i }}
                 >
                   {cat.name}
                 </button>
@@ -204,7 +217,7 @@ export function HomePage() {
                 categories={categories ?? []}
                 index={i + 1}
                 onUpvote={handleUpvote}
-                isUpvoting={upvotePost.isPending}
+                isUpvoting={pendingUpvoteIds.has(String(post.id))}
               />
             ))}
 
