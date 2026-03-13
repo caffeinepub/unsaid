@@ -14,17 +14,15 @@ import { toast } from "sonner";
 import { CreateCommentError } from "../backend.d";
 import type { Comment } from "../backend.d";
 import { BottomNav } from "../components/BottomNav";
-import { useActor } from "../hooks/useActor";
 import {
   useCreateComment,
-  useGetAnonymousId,
   useGetCategories,
   useGetPost,
   useUpvoteComment,
   useUpvotePost,
 } from "../hooks/useQueries";
 import { getCategoryColor } from "../utils/categories";
-import { getDeviceId } from "../utils/fingerprint";
+import { computeAnonymousId, getDeviceId } from "../utils/fingerprint";
 import { formatDate, relativeTime } from "../utils/time";
 import { hasUpvotedComment, hasUpvotedPost } from "../utils/upvoteStore";
 
@@ -35,33 +33,6 @@ const toastStyle = (isError = false) => ({
     color: "oklch(0.94 0.005 285)",
   },
 });
-
-// Component to show the anonymous ID for a comment
-function CommentAnonymousLabel({
-  ipHash,
-  postId,
-}: { ipHash: string; postId: bigint }) {
-  const { actor, isFetching } = useActor();
-  const [anonId, setAnonId] = useState<bigint | null>(null);
-
-  useEffect(() => {
-    if (!actor || isFetching) return;
-    actor
-      .getAnonymousId(ipHash, postId)
-      .then(setAnonId)
-      .catch(() => null);
-  }, [actor, isFetching, ipHash, postId]);
-
-  if (anonId === null)
-    return (
-      <span className="text-[oklch(0.45_0.01_285)] text-xs">Anonymous...</span>
-    );
-  return (
-    <span className="text-[oklch(0.65_0.22_285)] text-xs font-semibold">
-      Anonymous #{String(anonId).padStart(4, "0")}
-    </span>
-  );
-}
 
 // Individual comment component
 function CommentItem({
@@ -78,6 +49,9 @@ function CommentItem({
   const [localCount, setLocalCount] = useState(Number(comment.upvotes));
   const [localUpvoted, setLocalUpvoted] = useState(upvoted);
 
+  // Compute anonymous ID locally: stable per device+post
+  const anonId = computeAnonymousId(comment.ipHash, postId);
+
   const handleUpvote = async () => {
     if (localUpvoted) return;
     setLocalUpvoted(true);
@@ -85,7 +59,6 @@ function CommentItem({
     try {
       await upvoteComment.mutateAsync({ commentId: comment.id, postId });
     } catch {
-      // Roll back optimistic update on failure
       setLocalUpvoted(false);
       setLocalCount((c) => c - 1);
     }
@@ -97,7 +70,9 @@ function CommentItem({
       data-ocid={`post.comment.item.${index}`}
     >
       <div className="flex items-center justify-between mb-1.5">
-        <CommentAnonymousLabel ipHash={comment.ipHash} postId={postId} />
+        <span className="text-[oklch(0.65_0.22_285)] text-xs font-semibold">
+          Anonymous #{String(anonId).padStart(4, "0")}
+        </span>
         <span
           className="text-[10px] text-[oklch(0.4_0.01_285)]"
           title={formatDate(comment.timestamp)}
@@ -133,7 +108,6 @@ export function PostDetailPage() {
   const deviceId = getDeviceId();
 
   const { data: postWithComments, isLoading, error } = useGetPost(postId);
-  const { data: anonIdData } = useGetAnonymousId(deviceId, postId);
   const { data: categories } = useGetCategories();
   const upvotePost = useUpvotePost();
   const createComment = useCreateComment();
@@ -151,6 +125,9 @@ export function PostDetailPage() {
       setLocalUpvotes(Number(post.upvotes));
     }
   }, [post]);
+
+  // My anonymous ID for this post (computed locally)
+  const myAnonId = computeAnonymousId(deviceId, postId);
 
   // Resolve actual category name from ID
   const resolvedCategory =
@@ -316,10 +293,7 @@ export function PostDetailPage() {
               strokeWidth={1.5}
             />
             <span className="text-xs font-semibold text-[oklch(0.65_0.22_285)]">
-              Anonymous #
-              {anonIdData != null
-                ? String(anonIdData).padStart(4, "0")
-                : "????"}
+              Anonymous #{String(myAnonId).padStart(4, "0")}
             </span>
           </div>
 

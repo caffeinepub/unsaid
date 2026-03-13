@@ -41,3 +41,17 @@ export function getDeviceId(): string {
     return generateFingerprint();
   }
 }
+
+/**
+ * Computes a stable 4-digit anonymous ID for a given device+post combination.
+ * Each unique device gets a different number on the same post.
+ */
+export function computeAnonymousId(deviceId: string, postId: bigint): number {
+  const combined = deviceId + String(postId);
+  let hash = 5381;
+  for (let i = 0; i < combined.length; i++) {
+    hash = (hash << 5) + hash + combined.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return ((hash >>> 0) % 9000) + 1000;
+}
