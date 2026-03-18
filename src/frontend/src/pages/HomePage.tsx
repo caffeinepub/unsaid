@@ -257,7 +257,8 @@ export function HomePage() {
       <button
         type="button"
         onClick={() => setIsCreateOpen(true)}
-        className="fixed bottom-[76px] right-4 z-30 w-14 h-14 rounded-2xl bg-[oklch(0.65_0.22_285)] hover:bg-[oklch(0.70_0.22_285)] active:scale-95 text-white shadow-glow flex items-center justify-center transition-all"
+        className="fixed right-4 z-50 w-14 h-14 rounded-2xl bg-[oklch(0.65_0.22_285)] hover:bg-[oklch(0.70_0.22_285)] active:scale-95 text-white shadow-glow flex items-center justify-center transition-all"
+        style={{ bottom: "calc(76px + env(safe-area-inset-bottom, 0px))" }}
         data-ocid="home.create.button"
         aria-label="Create new post"
       >
